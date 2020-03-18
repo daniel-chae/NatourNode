@@ -1,19 +1,31 @@
-const express = require('express');
-const tourController = require('../controllers/tourController');
+const express = require('express'); //require express
+const tourController = require('../controllers/tourController'); //require tourControllers
+const authController = require('../controllers/authController');
 
 const router = express.Router(); //Create our own router
 
-router.param('id', tourController.checkID); // middleware can be written for a route with specific parameter
+// router.param('id', tourController.checkID); // middleware can be written for a route with specific parameter
+
+router.use(authController.protect);
 
 router
   .route('/') //tourRouter already starts from a specific route '/api/v1/tours'
   .get(tourController.getAllTours)
-  .post(tourController.checkBody, tourController.createTour);
+  .post(tourController.createTour);
+
+router.route('/tour-stats').get(tourController.getTourStats);
+router.route('/monthly-plan/:year').get(tourController.getMonthlyPlan);
+router
+  .route('/top-5-cheap')
+  .get(tourController.aliasTopTours, tourController.getAllTours);
 
 router
   .route('/:id')
   .get(tourController.getTour)
   .patch(tourController.updateTour)
-  .delete(tourController.deleteTour);
+  .delete(
+    authController.restrictTo('admin', 'lead-guide'),
+    tourController.deleteTour
+  );
 
 module.exports = router;
