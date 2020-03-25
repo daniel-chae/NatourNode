@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const { promisify } = require('util');
 
 const jwt = require('jsonwebtoken');
@@ -13,6 +14,34 @@ const signToken = id => {
   });
 };
 
+const createSendToken = (user, statusCode, res) => {
+  const token = signToken(user._id);
+
+  // lecture 141 sending JWT via cookie
+  const cookieOptions = {
+    expires: new Date(
+      Date.now() + process.env.JWT_COOKIE_EXPIRES_IN * 24 * 60 * 60 * 1000
+    ),
+    httpOnly: true
+  };
+
+  if (process.env.NODE_ENV === 'production') cookieOptions.secure = true;
+
+  // cookie is small piece of text that server can send to client.
+  // client will save the cookie and send it back for future request.
+  res.cookie('jwt', token, cookieOptions);
+
+  user.password = undefined;
+
+  res.status(statusCode).json({
+    status: 'success',
+    token,
+    data: {
+      user
+    }
+  });
+};
+
 // lecture-125 Creating new users
 exports.signup = catchAsync(async (req, res, next) => {
   const newUser = await User.create({
@@ -25,15 +54,7 @@ exports.signup = catchAsync(async (req, res, next) => {
 
   // lecture128 create a jsonwebtoken - since the signed up user will be logged in.
   // Secret should be at least 32 characters long to be safe.
-  const token = signToken(newUser._id);
-
-  res.status(201).json({
-    status: 'success',
-    token, //send token to client -> client will store this in cookie or localStorage
-    data: {
-      user: newUser
-    }
-  });
+  createSendToken(newUser, 201, res);
 });
 
 // lecture129 logging in user
@@ -54,12 +75,7 @@ exports.login = catchAsync(async (req, res, next) => {
   }
 
   // if everything is okay, send token to client
-  const token = signToken(user._id);
-
-  res.status(200).json({
-    status: 'success',
-    token
-  });
+  createSendToken(user, 200, res);
 });
 
 // lecture130 protecting tour routes
@@ -133,9 +149,9 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
   // 3) Send it to user's email
   const resetURL = `${req.protocol}://${req.get(
     'host'
-  )}/api/v1/users/resetPassword/${resetToken}}`;
+  )}/api/v1/users/resetPassword/${resetToken}`;
 
-  const message = `Forgot your password? Submit a PATCH request with your new password and passwordConfirm to: ${resetURL}.\n If you didn't forget your password, please ignore this email!`;
+  const message = `Forgot your password? Submit a PATCH request with your new password and passwordConfirm to: ${resetURL}\n If you didn't forget your password, please ignore this email!`;
 
   try {
     await sendEmail({
@@ -144,13 +160,11 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
       message
     });
 
-    console.log('reached here2');
     res.status(200).json({
       status: 'success',
       message: 'Token sent to email!'
     });
   } catch (err) {
-    console.log(err);
     user.passwordResetToken = null;
     user.passwordResetExpires = null;
     await user.save({ validateBeforeSave: false });
@@ -162,4 +176,53 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
   }
 });
 
-exports.resetPassword = catchAsync(async (req, res, next) => {});
+exports.resetPassword = catchAsync(async (req, res, next) => {
+  // 1) Get user based on the token
+  const hashedToken = crypto
+    .createHash('sha256')
+    .update(req.params.token)
+    .digest('hex');
+
+  const user = await User.findOne({
+    passwordResetToken: hashedToken,
+    passwordResetExpires: { $gt: Date.now() }
+  });
+
+  // 2) If token has not expired, and there is user, set the new password
+  if (!user) {
+    return next(new AppError('Token is invalid or has expired', 400)); //400 bad request
+  }
+
+  user.password = req.body.password;
+  user.passwordConfirm = req.body.passwordConfirm;
+  user.passwordResetToken = undefined;
+  user.passwordResetExpires = undefined;
+  await user.save();
+
+  // 3) Update changedPasswordAt property for the user
+  // 4) Log the user in, send JWT
+  createSendToken(user, 201, res);
+});
+
+exports.updatePassword = catchAsync(async (req, res, next) => {
+  if (!req.body.password) {
+    return next(new AppError('Please provide password', 400));
+  }
+
+  // 1) Get user from collection
+  // user coming from protect middleware
+  const user = await User.findById(req.user._id).select('+password');
+
+  // 2) Check if POSTed current password is correct
+  if (!(await user.correctPassword(req.body.passwordCurrent, user.password))) {
+    return next(new AppError('Your current password is wrong'), 401);
+  }
+
+  // 3) If so, update password
+  user.password = req.body.password;
+  user.passwordConfirm = req.body.passwordConfirm;
+  await user.save();
+
+  // 4) Log user in, send JWT
+  createSendToken(user, 200, res);
+});

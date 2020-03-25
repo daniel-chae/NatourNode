@@ -44,7 +44,12 @@ const userSchema = new mongoose.Schema({
   },
   passwordChangedAt: Date,
   passwordResetToken: String,
-  passwordResetExpires: Date
+  passwordResetExpires: Date,
+  active: {
+    type: Boolean,
+    default: true,
+    select: false
+  }
 });
 
 // lecture126 encrypt the password
@@ -56,9 +61,12 @@ userSchema.pre('save', async function(next) {
   // bcrypt.hash takes two arguments. First string to hash, second salt to add to the password.
   // the higher the number the higher it is be CPU intensive. 12 is standard nowadays.
   this.password = await bcrypt.hash(this.password, 12);
-  this.passwordChangedAt = Date.now();
+
+  if (!this.isNew) {
+    this.passwordChangedAt = Date.now() - 1000;
+  }
   // we do not want to store passwordConfirm to database. It was just used for validation.
-  this.passwordConfirm = null; //even if passwordConfirm is required field, it still works. It is simply required input.
+  this.passwordConfirm = undefined; //even if passwordConfirm is required field, it still works. It is simply required input.
   next();
 });
 
@@ -94,6 +102,13 @@ userSchema.methods.createPasswordResetToken = function() {
 
   return resetToken;
 };
+
+//lecture 139 - Deleting the current user
+userSchema.pre(/^find/, function(next) {
+  // this points to the current query middleware
+  this.find({ active: { $ne: false } });
+  next();
+});
 
 const User = mongoose.model('User', userSchema);
 

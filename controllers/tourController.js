@@ -1,5 +1,5 @@
 // const fs = require('fs');
-const Tour = require('../models/tourModels');
+const Tour = require('../models/tourModel');
 const APIFeatures = require('../utils/apiFeatures');
 const catchAsync = require('./../utils/catchAsync');
 const AppError = require('../utils/appError');
@@ -62,9 +62,8 @@ exports.getAllTours = catchAsync(async (req, res, next) => {
 
 //-----------------------Handler for tours/:id-------------------------------
 exports.getTour = catchAsync(async (req, res, next) => {
-  const tour = await Tour.findById(req.params.id);
+  const tour = await Tour.findById(req.params.id).populate('reviews'); //lecture 156 virtual populate
   // tour.findOne({_id: req.params.id});
-
   if (!tour) {
     return next(new AppError('No tour found with that ID', 404));
   }

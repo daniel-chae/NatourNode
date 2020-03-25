@@ -1,10 +1,11 @@
 const mongoose = require('mongoose');
 const slugify = require('slugify');
+// const User = require('./userModel');
 // const validator = require('validator');
 
 const tourSchema = new mongoose.Schema(
   {
-    //tpye, required, unique, trim, maxlength, minlength, min, max, enum, default, validate, select
+    //type, required, unique, trim, maxlength, minlength, min, max, enum, default, validate, select
     name: {
       type: String,
       required: [true, 'A tour must have a name'], //lecture 107 - validator
@@ -81,7 +82,41 @@ const tourSchema = new mongoose.Schema(
     secretTour: {
       type: Boolean,
       default: false
-    }
+    },
+    // lecture149 modelling locations
+    startLocation: {
+      // GeoJSON
+      type: {
+        type: String,
+        default: 'Point',
+        enum: ['Point']
+      },
+      coordinates: [Number], //latitude, longtitude
+      address: String,
+      description: String
+    },
+    // how to create embeded document. It should be array of objects
+    locations: [
+      {
+        type: {
+          type: String,
+          default: 'Point',
+          enum: ['Point']
+        },
+        coordinates: [Number],
+        address: String,
+        description: String,
+        day: Number
+      }
+    ],
+    // guides: Array -> lecture150 embeding document example
+    // lecture151 Child referencing
+    guides: [
+      {
+        type: mongoose.Schema.ObjectId,
+        ref: 'User' //We do not even need to import User model
+      }
+    ]
   },
   //optional configuration. Here it defines if virtual property will be added or not.
   {
@@ -95,6 +130,13 @@ tourSchema.virtual('durationWeeks').get(function() {
   return this.duration / 7;
 });
 
+// lecture156 Virtual populate
+tourSchema.virtual('reviews', {
+  ref: 'Review', // target schema
+  foreignField: 'tour', //identifier for mapping in target schema
+  localField: '_id' // identifier for mapping in current schema
+});
+
 //lecture 104 - document middleware
 //Mongoose document middleware
 //Callback function is called before a document is saved and pass next as argument
@@ -105,6 +147,21 @@ tourSchema.pre('save', function(next) {
   //saving a new property called 'slug' and use slugify package to create it. Pre-requisite is to have slug property in schema
   next(); //next is called to proceed to the next middleware
 });
+
+tourSchema.pre(/^find/, function(next) {
+  this.populate({
+    path: 'guides',
+    select: '-__v -passwordChangedAt'
+  });
+  next();
+});
+
+// lecture150 embedding guides
+// tourSchema.pre('save', async function(next) {
+//   const guidesPromises = this.guides.map(async id => await User.findById(id));
+//   this.guides = await Promise.all(guidesPromises);
+//   next();
+// });
 
 //lecture104
 //multiple middlewares can run
@@ -124,17 +181,20 @@ tourSchema.post('save', function(doc, next) {
 //tourSchema.pre('find', function(next) { -> issue with this code is that it doesn't run for findOne() or other find method.
 //we use regular expression for this middleware to be applied on any find method
 tourSchema.pre(/^find/, function(next) {
+  console.log('3');
   this.find({ secretTour: { $ne: true } }); //this for query middleware is not the document but the query object
   // this.start = Date.now();
+  console.log('4');
   next();
 });
 
 //lecture 105 - query middleware
-tourSchema.post(/^find/, function(docs, next) {
-  // console.log(`Query took ${Date.now() - this.start} miliseconds`);
-  // console.log(docs);
-  next();
-});
+// tourSchema.post(/^find/, function(docs, next) {
+//   console.log('3');
+//   // console.log(`Query took ${Date.now() - this.start} miliseconds`);
+//   // console.log(docs);
+//   next();
+// });
 
 //lecture 106 - aggregation middleware
 //If we want to exclude secret tour from all aggregation, then better to do it in schema level than doing it for each controller
